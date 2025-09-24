@@ -553,7 +553,6 @@
 
 
 //4
-
 import express from "express";
 import multer from "multer";
 import { exec } from "child_process";
@@ -600,12 +599,18 @@ const connectMongoDB = async () => {
     if(!MONGO_URI) throw new Error("MONGO_URI required");
     await mongoose.connect(MONGO_URI);
     console.log("✅ MongoDB connected");
-  } catch(e){ console.error(e.message); throw e; }
+  } catch(e){ 
+    console.error(e.message); 
+    throw e; 
+  }
 };
 
 // Routes
 app.use("/api/history", conversionRoutes);
 app.use("/api/conversions", conversionRoutes);
+
+// Health check
+app.get("/health", (req,res) => res.json({ status:"OK", timestamp: new Date().toISOString() }));
 
 // Conversion endpoint
 app.post("/convert", upload.single("file"), async (req,res)=>{
@@ -617,28 +622,30 @@ app.post("/convert", upload.single("file"), async (req,res)=>{
   const outputPath = path.join(CONVERT_DIR, outputFileName);
 
   try {
+    // Use python3 in Docker/Render environment
     const cmd = `python3 "${path.join(__dirname,"convert.py")}" "${inputPath}" "${outputPath}"`;
     console.log("🔄 Executing:", cmd);
 
     exec(cmd, { timeout: 60000 }, async (err, stdout, stderr) => {
       if(err){
         console.error("Conversion error:", stderr || err.message);
-        return res.status(500).json({error:"Conversion failed", details:stderr||err.message});
+        return res.status(500).json({error:"Conversion failed", details: stderr || err.message});
       }
 
       if(!fs.existsSync(outputPath)){
+        console.error("Output file missing after conversion");
         return res.status(500).json({error:"Output file not found"});
       }
 
-      // Save record
+      // Save record in DB
       try{
         const newRecord = new conversion({
-          originalName:req.file.originalname,
-          convertedName:path.basename(outputPath),
-          fromType:req.file.mimetype,
-          toType:"docx",
-          downloadUrl:`/downloads/${path.basename(outputPath)}`,
-          createdAt:new Date()
+          originalName: req.file.originalname,
+          convertedName: path.basename(outputPath),
+          fromType: req.file.mimetype,
+          toType: "docx",
+          downloadUrl: `/downloads/${path.basename(outputPath)}`,
+          createdAt: new Date()
         });
         await newRecord.save();
       }catch(e){ console.error("DB save error:", e.message); }
@@ -646,8 +653,10 @@ app.post("/convert", upload.single("file"), async (req,res)=>{
       // Send file
       res.download(outputPath, `converted_${req.file.originalname}.docx`, ()=>{
         setTimeout(()=>{
-          if(fs.existsSync(inputPath)) fs.unlinkSync(inputPath);
-          if(fs.existsSync(outputPath)) fs.unlinkSync(outputPath);
+          try{
+            if(fs.existsSync(inputPath)) fs.unlinkSync(inputPath);
+            if(fs.existsSync(outputPath)) fs.unlinkSync(outputPath);
+          }catch(e){ console.error("Cleanup error:", e.message); }
         },5000);
       });
     });
@@ -661,8 +670,8 @@ app.post("/convert", upload.single("file"), async (req,res)=>{
 
 // Start server
 const PORT = process.env.PORT || 5000;
-connectMongoDB().then(()=>{
-  app.listen(PORT, ()=>console.log(`✅ Server running on port ${PORT}`));
-});
+connectMongoDB()
+.then(()=> app.listen(PORT, ()=>console.log(`✅ Server running on port ${PORT}`)))
+.catch(err => console.error("❌ Server start failed:", err.message));
 
 
