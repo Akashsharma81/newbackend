@@ -702,12 +702,16 @@ const CONVERT_DIR = path.join(__dirname, "converted");
 if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 if (!fs.existsSync(CONVERT_DIR)) fs.mkdirSync(CONVERT_DIR, { recursive: true });
 
-// Multer
+// Multer setup
 const upload = multer({ 
   dest: UPLOAD_DIR,
   limits: { fileSize: 50 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
-    const allowed = ['application/pdf', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'];
+    const allowed = [
+      'application/pdf',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      'application/msword'
+    ];
     cb(null, allowed.includes(file.mimetype));
   }
 });
@@ -723,10 +727,7 @@ const connectMongoDB = async () => {
     if(!MONGO_URI) throw new Error("MONGO_URI required");
     await mongoose.connect(MONGO_URI);
     console.log("✅ MongoDB connected");
-  } catch(e){ 
-    console.error(e.message); 
-    throw e; 
-  }
+  } catch(e){ console.error(e.message); throw e; }
 };
 
 // Routes
@@ -739,21 +740,24 @@ app.get("/health", (req,res) => res.json({ status:"OK", timestamp: new Date().to
 // Conversion endpoint
 app.post("/convert", upload.single("file"), async (req,res)=>{
   const inputPath = req.file?.path;
-  const { toType } = req.body; // expected: 'pdf' or 'docx'
   if(!inputPath) return res.status(400).json({error:"No file uploaded"});
-  if(!['pdf','docx'].includes(toType)) return res.status(400).json({error:"Invalid type"});
+
+  const { toType } = req.body;
+  if(!toType || !["docx","pdf"].includes(toType)) 
+    return res.status(400).json({error:"Invalid conversion type"});
 
   const timestamp = Date.now();
-  const outputFileName = `converted_${timestamp}.${toType}`;
+  const ext = toType;
+  const outputFileName = `converted_${timestamp}.${ext}`;
   const outputPath = path.join(CONVERT_DIR, outputFileName);
 
   try {
     let cmd = "";
-    if(toType === "docx"){ 
+    if(toType === "docx"){
       // PDF -> DOCX
       cmd = `python3 "${path.join(__dirname,"convert.py")}" "${inputPath}" "${outputPath}"`;
-    } else if(toType === "pdf"){ 
-      // DOCX -> PDF
+    } else if(toType === "pdf"){
+      // DOCX -> PDF using LibreOffice
       cmd = `soffice --headless --convert-to pdf --outdir "${CONVERT_DIR}" "${inputPath}"`;
     }
 
@@ -765,17 +769,15 @@ app.post("/convert", upload.single("file"), async (req,res)=>{
         return res.status(500).json({error:"Conversion failed", details: stderr || err.message});
       }
 
-      // DOCX -> PDF produces file with original name + .pdf
       let finalOutputPath = outputPath;
       if(toType === "pdf"){
-        const baseName = path.basename(inputPath, path.extname(inputPath));
-        finalOutputPath = path.join(CONVERT_DIR, `${baseName}.pdf`);
-        if(fs.existsSync(finalOutputPath)) fs.renameSync(finalOutputPath, outputPath);
-      }
-
-      if(!fs.existsSync(outputPath)){
-        console.error("Output file missing after conversion");
-        return res.status(500).json({error:"Output file not found"});
+        const pdfName = path.basename(inputPath, path.extname(inputPath)) + ".pdf";
+        finalOutputPath = path.join(CONVERT_DIR, pdfName);
+        if(fs.existsSync(finalOutputPath)){
+          fs.renameSync(finalOutputPath, outputPath);
+        } else {
+          return res.status(500).json({error:"Output PDF not found"});
+        }
       }
 
       // Save record in DB
@@ -792,7 +794,7 @@ app.post("/convert", upload.single("file"), async (req,res)=>{
       }catch(e){ console.error("DB save error:", e.message); }
 
       // Send file
-      res.download(outputPath, `converted_${req.file.originalname}.${toType}`, ()=>{
+      res.download(outputPath, `converted_${req.file.originalname}.${ext}`, ()=>{
         setTimeout(()=>{
           try{
             if(fs.existsSync(inputPath)) fs.unlinkSync(inputPath);
