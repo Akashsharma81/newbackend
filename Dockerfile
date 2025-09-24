@@ -1,20 +1,25 @@
 # Base image
-FROM node:18-bullseye
+FROM debian:bullseye
 
-# LibreOffice install karo
+# Dependencies + LibreOffice
 RUN apt-get update && apt-get install -y \
     libreoffice \
+    python3 \
+    python3-pip \
     && rm -rf /var/lib/apt/lists/*
 
-# App ka kaam
+# Workdir
 WORKDIR /app
+
+# Copy package.json and install deps
 COPY package*.json ./
 RUN npm install
 
+# Copy all project files
 COPY . .
 
-# Server start karega
-CMD ["node", "server.js"]
+# Expose port
+EXPOSE 8080
 
-# Render ko port chahiye
-EXPOSE 10000
+# Start command
+CMD ["npm", "start"]
