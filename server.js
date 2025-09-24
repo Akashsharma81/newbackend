@@ -552,7 +552,131 @@
 // startServer();
 
 
-//4
+//4 ye niche ka code pdf to doc me work kar raha hai
+// import express from "express";
+// import multer from "multer";
+// import { exec } from "child_process";
+// import path from "path";
+// import fs from "fs";
+// import { fileURLToPath } from "url";
+// import cors from "cors";
+// import mongoose from "mongoose";
+// import dotenv from "dotenv";
+// import conversionRoutes from "./routes/conversionRoutes.js";
+// import conversion from "./model/conversion.js";
+
+// dotenv.config();
+
+// const __filename = fileURLToPath(import.meta.url);
+// const __dirname = path.dirname(__filename);
+
+// const app = express();
+
+// // Directories
+// const UPLOAD_DIR = path.join(__dirname, "uploads");
+// const CONVERT_DIR = path.join(__dirname, "converted");
+// if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+// if (!fs.existsSync(CONVERT_DIR)) fs.mkdirSync(CONVERT_DIR, { recursive: true });
+
+// // Multer
+// const upload = multer({ 
+//   dest: UPLOAD_DIR,
+//   limits: { fileSize: 50 * 1024 * 1024 },
+//   fileFilter: (req, file, cb) => {
+//     const allowed = ['application/pdf'];
+//     cb(null, allowed.includes(file.mimetype));
+//   }
+// });
+
+// app.use(cors({ origin: "*", methods: ["GET","POST","DELETE"], credentials:true }));
+// app.use(express.json({ limit: '50mb' }));
+// app.use(express.urlencoded({ extended:true, limit:'50mb' }));
+
+// // MongoDB
+// const connectMongoDB = async () => {
+//   try {
+//     const MONGO_URI = process.env.MONGO_URI;
+//     if(!MONGO_URI) throw new Error("MONGO_URI required");
+//     await mongoose.connect(MONGO_URI);
+//     console.log("✅ MongoDB connected");
+//   } catch(e){ 
+//     console.error(e.message); 
+//     throw e; 
+//   }
+// };
+
+// // Routes
+// app.use("/api/history", conversionRoutes);
+// app.use("/api/conversions", conversionRoutes);
+
+// // Health check
+// app.get("/health", (req,res) => res.json({ status:"OK", timestamp: new Date().toISOString() }));
+
+// // Conversion endpoint
+// app.post("/convert", upload.single("file"), async (req,res)=>{
+//   const inputPath = req.file?.path;
+//   if(!inputPath) return res.status(400).json({error:"No file uploaded"});
+
+//   const timestamp = Date.now();
+//   const outputFileName = `converted_${timestamp}.docx`;
+//   const outputPath = path.join(CONVERT_DIR, outputFileName);
+
+//   try {
+//     // Use python3 in Docker/Render environment
+//     const cmd = `python3 "${path.join(__dirname,"convert.py")}" "${inputPath}" "${outputPath}"`;
+//     console.log("🔄 Executing:", cmd);
+
+//     exec(cmd, { timeout: 60000 }, async (err, stdout, stderr) => {
+//       if(err){
+//         console.error("Conversion error:", stderr || err.message);
+//         return res.status(500).json({error:"Conversion failed", details: stderr || err.message});
+//       }
+
+//       if(!fs.existsSync(outputPath)){
+//         console.error("Output file missing after conversion");
+//         return res.status(500).json({error:"Output file not found"});
+//       }
+
+//       // Save record in DB
+//       try{
+//         const newRecord = new conversion({
+//           originalName: req.file.originalname,
+//           convertedName: path.basename(outputPath),
+//           fromType: req.file.mimetype,
+//           toType: "docx",
+//           downloadUrl: `/downloads/${path.basename(outputPath)}`,
+//           createdAt: new Date()
+//         });
+//         await newRecord.save();
+//       }catch(e){ console.error("DB save error:", e.message); }
+
+//       // Send file
+//       res.download(outputPath, `converted_${req.file.originalname}.docx`, ()=>{
+//         setTimeout(()=>{
+//           try{
+//             if(fs.existsSync(inputPath)) fs.unlinkSync(inputPath);
+//             if(fs.existsSync(outputPath)) fs.unlinkSync(outputPath);
+//           }catch(e){ console.error("Cleanup error:", e.message); }
+//         },5000);
+//       });
+//     });
+
+//   } catch(e){
+//     console.error("Setup error:", e.message);
+//     if(fs.existsSync(inputPath)) fs.unlinkSync(inputPath);
+//     res.status(500).json({error:"Conversion setup failed"});
+//   }
+// });
+
+// // Start server
+// const PORT = process.env.PORT || 5000;
+// connectMongoDB()
+// .then(()=> app.listen(PORT, ()=>console.log(`✅ Server running on port ${PORT}`)))
+// .catch(err => console.error("❌ Server start failed:", err.message));
+
+
+
+//5ye new hai
 import express from "express";
 import multer from "multer";
 import { exec } from "child_process";
@@ -583,7 +707,7 @@ const upload = multer({
   dest: UPLOAD_DIR,
   limits: { fileSize: 50 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
-    const allowed = ['application/pdf'];
+    const allowed = ['application/pdf', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'];
     cb(null, allowed.includes(file.mimetype));
   }
 });
@@ -615,21 +739,38 @@ app.get("/health", (req,res) => res.json({ status:"OK", timestamp: new Date().to
 // Conversion endpoint
 app.post("/convert", upload.single("file"), async (req,res)=>{
   const inputPath = req.file?.path;
+  const { toType } = req.body; // expected: 'pdf' or 'docx'
   if(!inputPath) return res.status(400).json({error:"No file uploaded"});
+  if(!['pdf','docx'].includes(toType)) return res.status(400).json({error:"Invalid type"});
 
   const timestamp = Date.now();
-  const outputFileName = `converted_${timestamp}.docx`;
+  const outputFileName = `converted_${timestamp}.${toType}`;
   const outputPath = path.join(CONVERT_DIR, outputFileName);
 
   try {
-    // Use python3 in Docker/Render environment
-    const cmd = `python3 "${path.join(__dirname,"convert.py")}" "${inputPath}" "${outputPath}"`;
+    let cmd = "";
+    if(toType === "docx"){ 
+      // PDF -> DOCX
+      cmd = `python3 "${path.join(__dirname,"convert.py")}" "${inputPath}" "${outputPath}"`;
+    } else if(toType === "pdf"){ 
+      // DOCX -> PDF
+      cmd = `soffice --headless --convert-to pdf --outdir "${CONVERT_DIR}" "${inputPath}"`;
+    }
+
     console.log("🔄 Executing:", cmd);
 
     exec(cmd, { timeout: 60000 }, async (err, stdout, stderr) => {
       if(err){
         console.error("Conversion error:", stderr || err.message);
         return res.status(500).json({error:"Conversion failed", details: stderr || err.message});
+      }
+
+      // DOCX -> PDF produces file with original name + .pdf
+      let finalOutputPath = outputPath;
+      if(toType === "pdf"){
+        const baseName = path.basename(inputPath, path.extname(inputPath));
+        finalOutputPath = path.join(CONVERT_DIR, `${baseName}.pdf`);
+        if(fs.existsSync(finalOutputPath)) fs.renameSync(finalOutputPath, outputPath);
       }
 
       if(!fs.existsSync(outputPath)){
@@ -643,7 +784,7 @@ app.post("/convert", upload.single("file"), async (req,res)=>{
           originalName: req.file.originalname,
           convertedName: path.basename(outputPath),
           fromType: req.file.mimetype,
-          toType: "docx",
+          toType,
           downloadUrl: `/downloads/${path.basename(outputPath)}`,
           createdAt: new Date()
         });
@@ -651,7 +792,7 @@ app.post("/convert", upload.single("file"), async (req,res)=>{
       }catch(e){ console.error("DB save error:", e.message); }
 
       // Send file
-      res.download(outputPath, `converted_${req.file.originalname}.docx`, ()=>{
+      res.download(outputPath, `converted_${req.file.originalname}.${toType}`, ()=>{
         setTimeout(()=>{
           try{
             if(fs.existsSync(inputPath)) fs.unlinkSync(inputPath);
@@ -673,5 +814,3 @@ const PORT = process.env.PORT || 5000;
 connectMongoDB()
 .then(()=> app.listen(PORT, ()=>console.log(`✅ Server running on port ${PORT}`)))
 .catch(err => console.error("❌ Server start failed:", err.message));
-
-
