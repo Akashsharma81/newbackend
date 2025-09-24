@@ -1,9 +1,27 @@
+# services:
+#   - type: web
+#     name: pdftodoc-backend
+#     env: node
+#     buildCommand: "cd backend && npm install"
+#     startCommand: "cd backend && node server.js"
+#     plan: free
+#     envVars:
+#       - key: NODE_ENV
+#         value: production
+#       - key: PORT
+#         value: 10000
+#       - key: MONGO_URI
+#         value: "<YOUR_MONGO_URI>"
+#     preDeployCommand: |
+#       apt-get update && apt-get install -y python3-pip
+#       pip3 install pdf2docx
+
 services:
   - type: web
     name: pdftodoc-backend
     env: node
-    buildCommand: "cd backend && npm install"
-    startCommand: "cd backend && node server.js"
+    buildCommand: "npm install"
+    startCommand: "node server.js"
     plan: free
     envVars:
       - key: NODE_ENV
@@ -13,5 +31,7 @@ services:
       - key: MONGO_URI
         value: "<YOUR_MONGO_URI>"
     preDeployCommand: |
-      apt-get update && apt-get install -y python3-pip
+      apt-get update
+      apt-get install -y python3 python3-pip
       pip3 install pdf2docx
+
